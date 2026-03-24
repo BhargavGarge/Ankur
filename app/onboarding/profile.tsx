@@ -1,22 +1,48 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, Camera } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
-  const [name, setName] = useState(profile.name || '');
+  const [name, setName] = useState(profile.name || user?.firstName || '');
   const [isFocused, setIsFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (name.trim()) {
+  const handleContinue = async () => {
+    if (!name.trim() || !user) return;
+    
+    setLoading(true);
+    try {
+      const supabase = await getAuthenticatedClient();
+      
+      const { error } = await supabase
+        .from('users')
+        .upsert({
+          id: user.id,
+          name: name.trim(),
+          avatar_url: user.imageUrl,
+          onboarding_complete: false,
+        });
+
+      if (error) throw error;
+
       updateUserProfile({ name: name.trim() });
       router.push('/onboarding/purpose' as any);
+    } catch (err: any) {
+      console.error('Error syncing profile:', err);
+      Alert.alert('Error', 'Failed to save profile. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,16 +118,20 @@ export default function ProfileScreen() {
         <View className="absolute bottom-0 left-0 w-full p-6 bg-white pb-10">
           <TouchableOpacity 
             onPress={handleContinue}
-            disabled={!name.trim()}
+            disabled={!name.trim() || loading}
             className={`w-full py-4 px-6 rounded-xl flex-row justify-center items-center ${
-              name.trim() ? 'bg-primary' : 'bg-surface-variant'
+              name.trim() && !loading ? 'bg-primary' : 'bg-surface-variant'
             }`}
           >
-            <Text className={`font-sans font-bold uppercase tracking-[0.15em] text-xs ${
-              name.trim() ? 'text-white' : 'text-outline'
-            }`}>
-              Continue
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className={`font-sans font-bold uppercase tracking-[0.15em] text-xs ${
+                name.trim() ? 'text-white' : 'text-outline'
+              }`}>
+                Continue
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

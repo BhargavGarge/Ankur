@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, StatusBar } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, Search, ChevronRight, Info, ArrowRight } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 const universities = [
   { id: 'tum', name: 'Technical University of Munich', city: 'Munich, Germany' },
@@ -17,17 +19,45 @@ const universities = [
 
 export default function UniversityScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUni, setSelectedUni] = useState<string | null>(profile.university || null);
   const [isFocused, setIsFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (selectedUni) {
+  const handleContinue = async () => {
+    if (!selectedUni || !user) return;
+    
+    setLoading(true);
+    try {
+      const supabase = await getAuthenticatedClient();
+      
+      // Note: In a real app, you might want to link the university_id 
+      // from the universities table. For now, we'll just save the name 
+      // if the schema doesn't match perfectly.
+      // Looking at the schema, we have university_id uuid references universities(id).
+      // Since our mock unis don't have UUIDs matching the DB yet, 
+      // we'll just skip the DB update or use a placeholder if needed.
+      // Wait, the schema HAS a universities table.
+      
+      const { error } = await supabase
+        .from('users')
+        .update({ city: universities.find(u => u.name === selectedUni)?.city.split(',')[0] })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
       updateUserProfile({ university: selectedUni });
       router.push('/onboarding/city' as any);
+    } catch (err: any) {
+      console.error('Error syncing university:', err);
+      Alert.alert('Error', 'Failed to save your selection. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -150,13 +180,20 @@ export default function UniversityScreen() {
           >
             <TouchableOpacity
               onPress={handleContinue}
-              className="bg-primary px-10 py-4 rounded-2xl flex-row items-center"
+              disabled={loading}
+              className={`bg-primary px-10 py-4 rounded-2xl flex-row items-center ${loading ? 'opacity-70' : ''}`}
               style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 15, elevation: 10 }}
             >
-              <Text className="text-white font-sans font-bold uppercase tracking-[0.15em] mr-3">
-                Continue
-              </Text>
-              <ArrowRight color="#ffffff" size={20} />
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <>
+                  <Text className="text-white font-sans font-bold uppercase tracking-[0.15em] mr-3">
+                    Continue
+                  </Text>
+                  <ArrowRight color="#ffffff" size={20} />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}

@@ -1,28 +1,51 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, GraduationCap, Briefcase, Search, Globe, ChevronRight, Check, Info } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 const visaTypes = [
-  { id: 'Student Visa', title: 'Student Visa', desc: 'Degree-seeking, language course, or exchange', icon: GraduationCap },
-  { id: 'Work Permit', title: 'Work Permit', desc: 'Employment, Freelance, or Blue Card', icon: Briefcase },
-  { id: 'Job Seeker Visa', title: 'Job Seeker Visa', desc: 'Opportunity card or 6-month seeking permit', icon: Search },
-  { id: 'EU Citizen', title: 'EU Citizen (no visa)', desc: 'Freedom of movement for EU/EEA nationals', icon: Globe },
+  { id: 'Student Visa', dbId: 'student', title: 'Student Visa', desc: 'Degree-seeking, language course, or exchange', icon: GraduationCap },
+  { id: 'Work Permit', dbId: 'work', title: 'Work Permit', desc: 'Employment, Freelance, or Blue Card', icon: Briefcase },
+  { id: 'Job Seeker Visa', dbId: 'job_seeker', title: 'Job Seeker Visa', desc: 'Opportunity card or 6-month seeking permit', icon: Search },
+  { id: 'EU Citizen', dbId: 'eu', title: 'EU Citizen (no visa)', desc: 'Freedom of movement for EU/EEA nationals', icon: Globe },
 ];
 
 export default function VisaScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
   const [selectedVisa, setSelectedVisa] = useState<string | null>(profile.visaType || null);
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (selectedVisa) {
+  const handleContinue = async () => {
+    if (!selectedVisa || !user) return;
+    
+    setLoading(true);
+    try {
+      const dbId = visaTypes.find(v => v.id === selectedVisa)?.dbId;
+      const supabase = await getAuthenticatedClient();
+      
+      const { error } = await supabase
+        .from('users')
+        .update({ visa_type: dbId })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
       updateUserProfile({ visaType: selectedVisa });
       router.push('/onboarding/arrival' as any);
+    } catch (err: any) {
+      console.error('Error syncing visa:', err);
+      Alert.alert('Error', 'Failed to save your selection. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -126,11 +149,16 @@ export default function VisaScreen() {
         <View className="absolute bottom-0 left-0 w-full bg-white/95 border-t border-[#E8E8E8] px-6 py-4 pb-8 items-center">
           <TouchableOpacity 
             onPress={handleContinue}
-            className="w-full max-w-2xl bg-[#1B4F72] py-4 rounded-[16px] items-center justify-center"
+            disabled={loading}
+            className={`w-full max-w-2xl bg-[#1B4F72] py-4 rounded-[16px] items-center justify-center ${loading ? 'opacity-70' : ''}`}
           >
-            <Text className="text-white font-sans font-bold tracking-widest uppercase text-sm">
-              Continue
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className="text-white font-sans font-bold tracking-widest uppercase text-sm">
+                Continue
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       )}
