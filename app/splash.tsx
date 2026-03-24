@@ -55,7 +55,7 @@ export default function SplashScreen() {
         <View className="items-center justify-end px-8 pb-12">
           <View className="w-full mb-6">
             <TouchableOpacity 
-              onPress={() => router.push('/onboarding/profile')}
+              onPress={() => router.push('/auth/signup')}
               className="w-full bg-[#1B4F72] py-5 rounded-[16px] items-center justify-center mb-6"
             >
               <Text className="text-white font-sans font-semibold text-[16px]">

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, ChevronRight, ArrowRight } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 const cities = [
   { id: 'Berlin', name: 'Berlin', emoji: '🇩🇪' },
@@ -18,15 +20,35 @@ const cities = [
 
 export default function CityScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
   const [selectedCity, setSelectedCity] = useState<string | null>(profile.city || null);
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (selectedCity) {
+  const handleContinue = async () => {
+    if (!selectedCity || !user) return;
+    
+    setLoading(true);
+    try {
+      const supabase = await getAuthenticatedClient();
+      
+      const { error } = await supabase
+        .from('users')
+        .update({ city: selectedCity })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
       updateUserProfile({ city: selectedCity });
       router.push('/onboarding/visa' as any);
+    } catch (err: any) {
+      console.error('Error syncing city:', err);
+      Alert.alert('Error', 'Failed to save your selection. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -110,12 +132,19 @@ export default function CityScreen() {
         <View className="absolute bottom-0 left-0 w-full p-6 pb-12 border-t border-[#E8E8E8] bg-white/95 items-center">
           <TouchableOpacity 
             onPress={handleContinue}
-            className="w-full max-w-xl py-5 bg-[#003857] rounded-full flex-row items-center justify-center shadow-lg"
+            disabled={loading}
+            className={`w-full max-w-xl py-5 bg-[#003857] rounded-full flex-row items-center justify-center shadow-lg ${loading ? 'opacity-70' : ''}`}
           >
-            <Text className="text-white font-sans font-bold uppercase tracking-[0.15em] mr-2">
-              Next step
-            </Text>
-            <ChevronRight color="#ffffff" size={20} />
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <>
+                <Text className="text-white font-sans font-bold uppercase tracking-[0.15em] mr-2">
+                  Next step
+                </Text>
+                <ChevronRight color="#ffffff" size={20} />
+              </>
+            )}
           </TouchableOpacity>
         </View>
       )}

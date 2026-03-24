@@ -7,6 +7,8 @@ interface UserProfile {
   city?: string;
   visaType?: string;
   arrivalStatus?: string;
+  arrivalDate?: string;
+  onboardingComplete?: boolean;
 }
 
 interface AppState {

@@ -1,27 +1,50 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Image, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, GraduationCap, Briefcase, Search, CheckCircle2 } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 const purposes = [
-  { id: 'Student', title: 'Student', desc: 'Studying at a German university', icon: GraduationCap },
-  { id: 'Working Professional', title: 'Working Professional', desc: 'I have a work permit', icon: Briefcase },
-  { id: 'Job Seeker', title: 'Job Seeker', desc: 'Looking for work or internships', icon: Search },
+  { id: 'Student', dbId: 'student', title: 'Student', desc: 'Studying at a German university', icon: GraduationCap },
+  { id: 'Working Professional', dbId: 'professional', title: 'Working Professional', desc: 'I have a work permit', icon: Briefcase },
+  { id: 'Job Seeker', dbId: 'job_seeker', title: 'Job Seeker', desc: 'Looking for work or internships', icon: Search },
 ];
 
 export default function PurposeScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
   const [selectedPurpose, setSelectedPurpose] = useState<string | null>(profile.purpose || null);
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (selectedPurpose) {
+  const handleContinue = async () => {
+    if (!selectedPurpose || !user) return;
+    
+    setLoading(true);
+    try {
+      const dbId = purposes.find(p => p.id === selectedPurpose)?.dbId;
+      const supabase = await getAuthenticatedClient();
+      
+      const { error } = await supabase
+        .from('users')
+        .update({ purpose: dbId })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
       updateUserProfile({ purpose: selectedPurpose });
       router.push('/onboarding/university' as any);
+    } catch (err: any) {
+      console.error('Error syncing purpose:', err);
+      Alert.alert('Error', 'Failed to save your selection. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -122,16 +145,20 @@ export default function PurposeScreen() {
       <View className="p-6 max-w-2xl mx-auto w-full pb-8 bg-surface">
         <TouchableOpacity 
           onPress={handleContinue}
-          disabled={!selectedPurpose}
+          disabled={!selectedPurpose || loading}
           className={`w-full py-4 rounded-xl items-center justify-center ${
-            selectedPurpose ? 'bg-primary' : 'bg-surface-variant'
+            selectedPurpose && !loading ? 'bg-primary' : 'bg-surface-variant'
           }`}
         >
-          <Text className={`font-body font-bold text-[16px] ${
-            selectedPurpose ? 'text-white' : 'text-outline'
-          }`}>
-            Continue
-          </Text>
+          {loading ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text className={`font-body font-bold text-[16px] ${
+              selectedPurpose ? 'text-white' : 'text-outline'
+            }`}>
+              Continue
+            </Text>
+          )}
         </TouchableOpacity>
         <Text className="text-center mt-4 font-body text-[12px] font-medium uppercase tracking-[0.1em] text-on-surface-variant opacity-60">
           Step 2 of 6

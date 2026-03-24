@@ -1,22 +1,56 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, KeyboardAvoidingView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '../../store/useAppStore';
 import { ArrowLeft, ArrowRight, Calendar, PlaneLanding } from 'lucide-react-native';
+import { useSupabase } from '../../hooks/useSupabase';
+import { useUser } from '@clerk/clerk-expo';
 
 export default function ArrivalScreen() {
   const router = useRouter();
+  const { user } = useUser();
+  const { getAuthenticatedClient } = useSupabase();
   const profile = useAppStore((state) => state.userProfile);
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
 
   const [arrivalStatus, setArrivalStatus] = useState<string | null>(profile.arrivalStatus || null);
-  const [arrivalDate, setArrivalDate] = useState(profile.arrivalDate || 'October 24, 2023');
+  const [arrivalDate, setArrivalDate] = useState(profile.arrivalDate || '2023-10-24');
+  const [loading, setLoading] = useState(false);
 
-  const handleContinue = () => {
-    if (arrivalStatus) {
-      updateUserProfile({ arrivalStatus, arrivalDate });
+  const handleContinue = async () => {
+    if (!arrivalStatus || !user) return;
+    
+    setLoading(true);
+    try {
+      const supabase = await getAuthenticatedClient();
+      
+      // Attempt to parse the date if possible, otherwise use a fallback or null
+      // The schema expects a 'date' type.
+      let dbDate = arrivalDate;
+      if (arrivalStatus === 'already_here') {
+        dbDate = new Date().toISOString().split('T')[0];
+      } else if (isNaN(Date.parse(arrivalDate))) {
+        dbDate = new Date().toISOString().split('T')[0];
+      }
+
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          arrival_date: dbDate,
+          onboarding_complete: true
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      updateUserProfile({ arrivalStatus, arrivalDate, onboardingComplete: true });
       router.push('/onboarding/preview' as any);
+    } catch (err: any) {
+      console.error('Error syncing arrival:', err);
+      Alert.alert('Error', 'Failed to save your selection. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,7 +126,7 @@ export default function ArrivalScreen() {
           </View>
 
           {/* Date Picker Section */}
-          {(arrivalStatus === 'arriving_soon' || arrivalStatus === 'already_here') && (
+          {arrivalStatus === 'arriving_soon' && (
             <View className="mb-12 items-center">
               <Text className="font-sans text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-6 text-center">
                 Select Date
@@ -132,13 +166,20 @@ export default function ArrivalScreen() {
           <View className="absolute bottom-0 left-0 w-full p-6 pb-12 bg-white/90 items-center justify-center border-t border-gray-100">
             <TouchableOpacity 
               onPress={handleContinue}
-              className="w-full max-w-xl bg-[#003857] py-5 rounded-2xl flex-row items-center justify-center"
+              disabled={loading}
+              className={`w-full max-w-xl bg-[#003857] py-5 rounded-2xl flex-row items-center justify-center ${loading ? 'opacity-70' : ''}`}
               style={{ shadowColor: '#003857', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 }}
             >
-              <Text style={{ fontFamily: 'Fraunces' }} className="text-xl font-medium tracking-wide text-white mr-3">
-                Build My Checklist
-              </Text>
-              <ArrowRight color="#ffffff" size={24} />
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <>
+                  <Text style={{ fontFamily: 'Fraunces' }} className="text-xl font-medium tracking-wide text-white mr-3">
+                    Build My Checklist
+                  </Text>
+                  <ArrowRight color="#ffffff" size={24} />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
