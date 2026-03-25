@@ -4,7 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { ClerkProvider, ClerkLoaded, useAuth, useUser } from '@clerk/clerk-expo';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState } from 'react';
 
 const tokenCache = {
   async getToken(key: string) {
@@ -39,15 +40,21 @@ function InitialLayout() {
   const { getAuthenticatedClient } = useSupabase();
   const updateUserProfile = useAppStore((state) => state.updateUserProfile);
   const setOnboarded = useAppStore((state) => state.setOnboarded);
+  const [isSyncing, setIsSyncing] = useState(true);
 
   useEffect(() => {
     if (!isLoaded) return;
+
+    if (!isSignedIn) {
+      setIsSyncing(false);
+      return;
+    }
 
     const syncProfile = async () => {
       if (isSignedIn && userId && user) {
         try {
           const supabase = await getAuthenticatedClient();
-          
+
           // Try to fetch existing profile
           let { data, error } = await supabase
             .from('users')
@@ -67,7 +74,7 @@ function InitialLayout() {
               })
               .select()
               .single();
-            
+
             if (upsertError) {
               console.error('Error creating initial profile:', upsertError);
             } else {
@@ -90,9 +97,96 @@ function InitialLayout() {
               onboardingComplete: data.onboarding_complete,
             });
             setOnboarded(data.onboarding_complete);
+
+            // Fetch user tasks
+            const { data: tasksData, error: tasksError } = await supabase
+              .from('user_tasks')
+              .select('*')
+              .eq('user_id', userId);
+
+            if (!tasksError) {
+              const { TASKS } = await import('../constants/tasks');
+
+              if (tasksData && tasksData.length > 0) {
+                // Map existing tasks
+                const mappedTasks = tasksData.map(t => ({
+                  id: t.task_id,
+                  status: t.status as 'todo' | 'in_progress' | 'done',
+                  docs_ready: t.docs_ready || [],
+                  steps_done: t.steps_done || [],
+                  deadline: t.deadline,
+                  data: t.data || {}
+                }));
+
+                // Check for missing tasks (newly added to TASKS constant)
+                const existingTaskIds = new Set(mappedTasks.map(t => t.id));
+                const missingTasks = TASKS.filter(task => !existingTaskIds.has(task.id));
+
+                if (missingTasks.length > 0) {
+                  const initialMissingTasks = missingTasks.map(task => ({
+                    user_id: userId,
+                    task_id: task.id,
+                    status: 'todo',
+                    docs_ready: [],
+                    steps_done: [],
+                    data: {}
+                  }));
+
+                  const { data: addedTasks, error: addError } = await supabase
+                    .from('user_tasks')
+                    .insert(initialMissingTasks)
+                    .select();
+
+                  if (!addError && addedTasks) {
+                    addedTasks.forEach(t => {
+                      mappedTasks.push({
+                        id: t.task_id,
+                        status: t.status as 'todo' | 'in_progress' | 'done',
+                        docs_ready: t.docs_ready || [],
+                        steps_done: t.steps_done || [],
+                        deadline: t.deadline,
+                        data: t.data || {}
+                      });
+                    });
+                  }
+                }
+
+                useAppStore.getState().setUserTasks(mappedTasks);
+              } else {
+                // Initialize default tasks if none exist
+                const { TASKS } = await import('../constants/tasks');
+                const initialTasks = TASKS.map(task => ({
+                  user_id: userId,
+                  task_id: task.id,
+                  status: 'todo',
+                  docs_ready: [],
+                  steps_done: [],
+                  data: {}
+                }));
+
+                const { data: newTasks, error: initError } = await supabase
+                  .from('user_tasks')
+                  .insert(initialTasks)
+                  .select();
+
+                if (!initError && newTasks) {
+                  const mappedTasks = newTasks.map(t => ({
+                    id: t.task_id,
+                    status: t.status as 'todo' | 'in_progress' | 'done',
+                    docs_ready: t.docs_ready || [],
+                    steps_done: t.steps_done || [],
+                    deadline: t.deadline,
+                    data: t.data || {}
+                  }));
+                  useAppStore.getState().setUserTasks(mappedTasks);
+                }
+              }
+            }
           }
         } catch (err) {
           console.error('Failed to sync profile:', err);
+        } finally {
+          setIsSyncing(false);
         }
       }
     };
@@ -103,7 +197,7 @@ function InitialLayout() {
   const onboardingComplete = useAppStore((state) => state.userProfile.onboardingComplete);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isSyncing) return;
 
     const segment = segments[0] as string | undefined;
     const inAuthGroup = segment === 'auth' || segment === 'splash' || segment === undefined;
@@ -121,7 +215,15 @@ function InitialLayout() {
     } else if (!isSignedIn && !inAuthGroup) {
       router.replace('/splash');
     }
-  }, [isSignedIn, isLoaded, segments, onboardingComplete]);
+  }, [isSignedIn, isLoaded, segments, onboardingComplete, isSyncing]);
+
+  if (!isLoaded || (isSignedIn && isSyncing)) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#1B4F72" />
+      </View>
+    );
+  }
 
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
