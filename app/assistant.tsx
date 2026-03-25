@@ -1,119 +1,181 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
+  ActivityIndicator,
+  Alert
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Zap, Info, Send, BookOpen } from 'lucide-react-native';
+import { ArrowLeft, Zap, Info, Send } from 'lucide-react-native';
+import { useAppStore } from '../store/useAppStore';
+
+/**
+ * DEBUGGING TIP:
+ * 1. If testing on Android Emulator: Use "http://10.0.2.2:3000/assistant"
+ * 2. If testing on iOS Simulator: Use "http://localhost:3000/assistant"
+ * 3. If testing on Physical Phone: Use your Computer's IP (e.g., "http://192.168.1.5:3000/assistant")
+ * 4. If using the Cloud Backend: Use the "ais-dev..." URL below.
+ */
+const SERVER_URL = "http://localhost:3000/assistant";
 
 export default function AssistantScreen() {
   const router = useRouter();
+  const profile = useAppStore((state) => state.userProfile) || {};
+  const userTasks = useAppStore((state) => state.userTasks) || {};
+
   const [messages, setMessages] = useState([
-     { id: '1', role: 'user', content: 'My landlord is refusing to give me the Wohnungsgeberbestätigung. What can I do?' },
-     { id: '2', role: 'assistant', content: 'That is unfortunately common. Here is what you can do:' }
+    { id: '1', role: 'assistant', content: `Hello ${profile.name || 'there'}! I'm Ankur. How can I help you?` }
   ]);
   const [inputText, setInputText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
-  const handleSend = () => {
-    if (!inputText.trim()) return;
-    setMessages([...messages, { id: Date.now().toString(), role: 'user', content: inputText }]);
+  // Auto-scroll logic
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages, isLoading]);
+
+  const getContextStr = () => {
+    try {
+      const completed = Object.values(userTasks).filter((t: any) => t?.status === 'done').length;
+      return `User: ${profile.name}, City: ${profile.city}, Progress: ${completed} tasks done.`;
+    } catch (e) { return "Context unavailable"; }
+  };
+
+  const askAssistant = async (question: string, currentHistory: any[]) => {
+    console.log("📡 Sending request to:", SERVER_URL);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+      const response = await fetch(SERVER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          question,
+          language: "English",
+          context: getContextStr(),
+          history: currentHistory.map(m => ({
+            role: m.role,
+            content: m.content
+          })).slice(-6)
+        }),
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Server Error ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("✅ AI Replied successfully");
+      return data.answer;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      console.error("❌ Fetch Error:", error.message);
+      throw error;
+    }
+  };
+
+  const handleSend = async () => {
+    console.log("Btn Pressed. Input:", inputText);
+    if (!inputText.trim() || isLoading) return;
+
+    const userMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: inputText.trim()
+    };
+
+    // 1. Update UI immediately
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    const currentInput = inputText;
     setInputText('');
-    // Mock response
-    setTimeout(() => {
-       setMessages(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: 'I am Ankur, a simulated assistant! Please implement Supabase APIs here.' }]);
-    }, 1000);
+    setIsLoading(true);
+
+    try {
+      // 2. Call AI with the updated list
+      const aiReply = await askAssistant(currentInput, updatedMessages);
+
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: aiReply
+      }]);
+    } catch (err: any) {
+      Alert.alert("Connection Error", "Could not reach Ankur. Check your internet or SERVER_URL.\n\n" + err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-surface-container-lowest">
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-      {/* Top Navbar */}
-      <View className="bg-white border-b border-outline-variant flex-row justify-between items-center px-4 py-3 z-50">
-        <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={() => router.back()} className="text-primary p-1">
-            <ArrowLeft color="#1B4F72" size={24} />
-          </TouchableOpacity>
-          <View className="flex-row items-center gap-2">
-            <Zap color="#1B4F72" size={20} fill="#1B4F72" />
-            <Text className="font-sans font-bold text-primary text-base">Ankur Assistant</Text>
-          </View>
-        </View>
+    <SafeAreaView className="flex-1 bg-white">
+      <StatusBar barStyle="dark-content" />
+
+      {/* Header */}
+      <View className="px-4 py-3 border-b border-slate-100 flex-row items-center gap-3">
+        <TouchableOpacity onPress={() => router.back()}><ArrowLeft color="#1B4F72" size={24} /></TouchableOpacity>
+        <Zap color="#1B4F72" size={20} fill="#1B4F72" />
+        <Text className="font-bold text-[#1B4F72] text-lg">Ankur Assistant</Text>
       </View>
 
-      {/* Context Banner */}
-      <View className="w-full bg-[#a5f2db]/30 px-4 py-2 flex-row items-center gap-2 border-b border-outline-variant">
-        <Info color="#166a59" size={16} />
-        <Text className="text-[12px] font-medium text-[#1f705f] tracking-tight">
-          Context: Berlin · Student Visa · Anmeldung task
-        </Text>
-      </View>
-
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
-        <ScrollView className="flex-1 px-4 py-6 max-w-2xl mx-auto w-full" showsVerticalScrollIndicator={false}>
-          {messages.map((msg, idx) => (
-             msg.role === 'user' ? (
-               <View key={msg.id} className="flex-row justify-end mb-8">
-                 <View className="max-w-[85%] bg-primary rounded-2xl rounded-tr-none px-4 py-3">
-                   <Text className="text-[14px] leading-relaxed font-body text-white">
-                     {msg.content}
-                   </Text>
-                 </View>
-               </View>
-             ) : (
-               <View key={msg.id} className="flex-col gap-4 mb-8">
-                 <View className="flex-col max-w-[90%] bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-none overflow-hidden">
-                   <View className="px-4 pt-4 pb-2 flex-row items-center gap-2">
-                     <View className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                       <Text className="text-white font-headline font-bold text-sm">A</Text>
-                     </View>
-                     <Text className="text-xs font-bold uppercase tracking-wider text-primary">Ankur</Text>
-                   </View>
-                   <View className="px-4 py-2">
-                     <Text className="text-[14px] leading-relaxed text-on-surface mb-3 font-body">
-                       {msg.content}
-                     </Text>
-                     {idx === 1 && (
-                       <View className="space-y-3">
-                         <View className="flex-row gap-3 mb-2">
-                           <Text className="font-bold text-primary">1.</Text>
-                           <Text className="text-[14px] text-on-surface flex-1">Send a written request via email — create a paper trail</Text>
-                         </View>
-                         <View className="flex-row gap-3 mb-2">
-                           <Text className="font-bold text-primary">2.</Text>
-                           <Text className="text-[14px] text-on-surface flex-1">Cite §19 BMG — landlords are legally required to provide this</Text>
-                         </View>
-                         <View className="flex-row gap-3">
-                           <Text className="font-bold text-primary">3.</Text>
-                           <Text className="text-[14px] text-on-surface flex-1">Contact your local Mieterverein (tenants association) for free legal help</Text>
-                         </View>
-                       </View>
-                     )}
-                   </View>
-                   {idx === 1 && (
-                     <View className="px-4 py-3 border-t border-outline-variant flex-row items-center gap-2" style={{ backgroundColor: 'rgba(243,243,246,0.5)' }}>
-                       <BookOpen size={14} color="#166a59" />
-                       <Text className="text-[11px] font-bold text-[#166a59] uppercase tracking-widest">
-                         Sources: BMG §19, Berlin Bürgeramt
-                       </Text>
-                     </View>
-                   )}
-                 </View>
-               </View>
-             )
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
+        <ScrollView
+          ref={scrollRef}
+          className="flex-1 px-4 pt-4"
+          keyboardShouldPersistTaps="always" // CRITICAL FIX: Allows tapping button while keyboard is up
+        >
+          {messages.map((msg) => (
+            <View key={msg.id} className={`mb-6 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <View className={`max-w-[85%] px-4 py-3 rounded-2xl ${msg.role === 'user' ? 'bg-[#1B4F72] rounded-tr-none' : 'bg-slate-100 rounded-tl-none'}`}>
+                <Text className={`${msg.role === 'user' ? 'text-white' : 'text-slate-800'} text-[14px]`}>{msg.content}</Text>
+              </View>
+            </View>
           ))}
-          <View className="h-20" />
+
+          {isLoading && (
+            <View className="flex-row items-center gap-2 mb-8">
+              <ActivityIndicator size="small" color="#1B4F72" />
+              <Text className="text-xs italic text-slate-400">Ankur is thinking...</Text>
+            </View>
+          )}
         </ScrollView>
 
-        <View className="w-full px-4 pb-6 pt-2 border-t" style={{ backgroundColor: '#ffffff', borderColor: 'rgba(232,232,232,0.3)' }}>
-          <View className="max-w-2xl mx-auto flex-row items-center gap-3 bg-white border border-outline-variant rounded-2xl px-4 py-2 shadow-sm">
-            <TextInput 
-              className="flex-1 bg-transparent border-none text-[14px] py-3 text-on-surface font-body" 
-              placeholder="Ask anything about Germany..." 
-              placeholderTextColor="#9ca3af"
+        {/* Input Area */}
+        <View className="p-4 border-t border-slate-100 bg-white">
+          <View className="flex-row items-center gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4">
+            <TextInput
+              className="flex-1 py-3 text-slate-800"
+              placeholder="Ask anything..."
               value={inputText}
               onChangeText={setInputText}
-              onSubmitEditing={handleSend}
+              onSubmitEditing={handleSend} // Allows pressing "Enter" on keyboard
+              multiline={false}
             />
-            <TouchableOpacity onPress={handleSend} className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
-              <Send color="#ffffff" size={18} />
+            <TouchableOpacity
+              onPress={() => {
+                console.log("Send icon clicked");
+                handleSend();
+              }}
+              disabled={!inputText.trim() || isLoading}
+              style={{ opacity: (!inputText.trim() || isLoading) ? 0.5 : 1 }}
+            >
+              <View className="w-10 h-10 rounded-full bg-[#1B4F72] items-center justify-center">
+                <Send color="#ffffff" size={18} />
+              </View>
             </TouchableOpacity>
           </View>
         </View>

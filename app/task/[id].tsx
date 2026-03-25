@@ -4,12 +4,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Button } from '../../components/ui/Button';
 import { FileText, MapPin, Sparkles, ArrowLeft, ChevronRight } from 'lucide-react-native';
+import { TASKS } from '../../constants/tasks';
+import { useAppStore } from '../../store/useAppStore';
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const userTasks = useAppStore((state) => state.userTasks);
 
-  const title = id === 'anmeldung' ? 'Anmeldung' : 'Task Details';
+  const task = TASKS.find(t => t.id === id);
+  const progress = userTasks[id as string];
+
+  if (!task) {
+    return (
+      <SafeAreaView className="flex-1 bg-surface items-center justify-center">
+        <Text className="font-headline text-xl text-primary mb-4">Task not found</Text>
+        <Button label="Go Back" onPress={() => router.back()} />
+      </SafeAreaView>
+    );
+  }
+
+  const isDone = progress?.status === 'done';
 
   return (
     <SafeAreaView className="flex-1 bg-surface">
@@ -24,11 +39,18 @@ export default function TaskDetailScreen() {
         <View className="w-8" />
       </View>
 
-      <ScrollView className="flex-1 px-6 pt-10 pb-32 max-w-2xl mx-auto w-full" showsVerticalScrollIndicator={false}>
+      <ScrollView className="flex-1 px-6 pt-10 pb-32 w-full" showsVerticalScrollIndicator={false}>
         <View className="mb-10">
-          <Text className="font-headline italic text-4xl text-primary mb-3">{title}</Text>
+          <View className="flex-row items-center mb-3">
+            <Text className="font-headline italic text-4xl text-primary flex-1">{task.title}</Text>
+            {isDone && (
+              <View className="bg-green-100 px-3 py-1 rounded-full border border-green-200">
+                <Text className="text-green-700 text-[10px] font-bold uppercase tracking-wider">Completed</Text>
+              </View>
+            )}
+          </View>
           <Text className="font-body text-base text-on-surface-variant leading-relaxed">
-            Registering your address in Germany is legally required within your first 14 days of moving into a new flat to obtain your tax ID.
+            {task.description}
           </Text>
         </View>
 
@@ -46,24 +68,44 @@ export default function TaskDetailScreen() {
           </View>
           <View className="flex-1 pr-4">
             <Text className="font-body text-base font-bold text-primary mb-1">Documents Checklist</Text>
-            <Text className="font-body text-[13px] text-on-surface-variant">Gather required papers</Text>
+            <Text className="font-body text-[13px] text-on-surface-variant">
+              {progress?.docs_ready?.length || 0} of {task.documents.length} papers gathered
+            </Text>
           </View>
           <ChevronRight color="#c1c7cf" size={20} />
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          onPress={() => router.push(`/task/${id}/office` as any)}
-          className="bg-white border text-left border-outline-variant rounded-2xl p-5 flex-row items-center mb-10"
-        >
-          <View className="w-12 h-12 bg-surface-container-lowest rounded-full items-center justify-center border border-outline-variant mr-4">
-            <MapPin color="#1B4F72" size={20} />
-          </View>
-          <View className="flex-1 pr-4">
-            <Text className="font-body text-base font-bold text-primary mb-1">Office Information</Text>
-            <Text className="font-body text-[13px] text-on-surface-variant">Directions & Appointment links</Text>
-          </View>
-          <ChevronRight color="#c1c7cf" size={20} />
-        </TouchableOpacity>
+        {task.fields && task.fields.length > 0 && (
+          <TouchableOpacity 
+            onPress={() => router.push(`/task/${id}/fields` as any)}
+            className="bg-white border text-left border-outline-variant rounded-2xl p-5 flex-row items-center mb-3"
+          >
+            <View className="w-12 h-12 bg-surface-container-lowest rounded-full items-center justify-center border border-outline-variant mr-4">
+              <Sparkles color="#1B4F72" size={20} />
+            </View>
+            <View className="flex-1 pr-4">
+              <Text className="font-body text-base font-bold text-primary mb-1">Information & Details</Text>
+              <Text className="font-body text-[13px] text-on-surface-variant">Store IBAN, addresses, and key dates</Text>
+            </View>
+            <ChevronRight color="#c1c7cf" size={20} />
+          </TouchableOpacity>
+        )}
+
+        {task.officeInfo && (
+          <TouchableOpacity 
+            onPress={() => router.push(`/task/${id}/office` as any)}
+            className="bg-white border text-left border-outline-variant rounded-2xl p-5 flex-row items-center mb-10"
+          >
+            <View className="w-12 h-12 bg-surface-container-lowest rounded-full items-center justify-center border border-outline-variant mr-4">
+              <MapPin color="#1B4F72" size={20} />
+            </View>
+            <View className="flex-1 pr-4">
+              <Text className="font-body text-base font-bold text-primary mb-1">Office Information</Text>
+              <Text className="font-body text-[13px] text-on-surface-variant">{task.officeInfo.name} & Appointment links</Text>
+            </View>
+            <ChevronRight color="#c1c7cf" size={20} />
+          </TouchableOpacity>
+        )}
 
         <View className="bg-[#a5f2db]/20 rounded-2xl p-6 mb-8 mt-2 border border-[#a5f2db]/50">
           <View className="flex-row items-center mb-3">
@@ -82,12 +124,14 @@ export default function TaskDetailScreen() {
           />
         </View>
 
-        <View className="mb-8">
-          <Button 
-            label="Mark as Complete" 
-            onPress={() => router.push(`/task/${id}/done` as any)}
-          />
-        </View>
+        {!isDone && (
+          <View className="mb-12">
+            <Button 
+              label="Mark as Complete" 
+              onPress={() => router.push(`/task/${id}/done` as any)}
+            />
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

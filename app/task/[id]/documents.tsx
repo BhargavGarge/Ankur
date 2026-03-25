@@ -1,27 +1,80 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StatusBar } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StatusBar, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Check } from 'lucide-react-native';
-
-const DOCS = [
-  { id: '1', name: 'Passport or ID Card', detail: 'Must be valid for at least 6 months.' },
-  { id: '2', name: 'Wohnungsgeberbestätigung', detail: 'Signed landlord confirmation form.' },
-  { id: '3', name: 'Anmeldeformular', detail: 'Completed registration form (signed).' },
-  { id: '4', name: 'Visa Documentation', detail: 'Required if non-EU citizen.' }
-];
+import { TASKS } from '../../../constants/tasks';
+import { useAppStore } from '../../../store/useAppStore';
+import { useSupabase } from '../../../hooks/useSupabase';
+import { useAuth } from '@clerk/clerk-expo';
 
 export default function DocumentsScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const { userId } = useAuth();
+  const { getAuthenticatedClient } = useSupabase();
+  const userTasks = useAppStore((state) => state.userTasks);
+  const updateTaskProgress = useAppStore((state) => state.updateTaskProgress);
+  const [isUpdating, setIsUpdating] = useState<string | null>(null);
 
-  const toggleCheck = (docId: string) => {
-    setChecked(prev => ({...prev, [docId]: !prev[docId]}));
+  const task = useMemo(() => TASKS.find(t => t.id === id), [id]);
+  const progress = userTasks[id as string];
+  const docsReady = progress?.docs_ready || [];
+
+  if (!task) {
+    return (
+      <SafeAreaView className="flex-1 bg-surface items-center justify-center">
+        <Text className="font-headline text-xl text-primary mb-4">Task not found</Text>
+        <TouchableOpacity onPress={() => router.back()} className="bg-primary px-6 py-3 rounded-xl">
+           <Text className="text-white font-bold">Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  const toggleDoc = async (docId: string) => {
+    if (!userId || isUpdating) return;
+    
+    setIsUpdating(docId);
+    const isReady = docsReady.includes(docId);
+    const newDocsReady = isReady 
+      ? docsReady.filter(d => d !== docId)
+      : [...docsReady, docId];
+
+    try {
+      // 1. Update store immediately for snappy UI
+      updateTaskProgress(task.id, { 
+        docs_ready: newDocsReady,
+        status: (progress?.status === 'todo' && newDocsReady.length > 0) ? 'in_progress' : progress?.status || 'todo'
+      });
+
+      // 2. Persist to Supabase
+      const supabase = await getAuthenticatedClient();
+      const { error } = await supabase
+        .from('user_tasks')
+        .update({ 
+          docs_ready: newDocsReady,
+          status: (progress?.status === 'todo' && newDocsReady.length > 0) ? 'in_progress' : progress?.status || 'todo'
+        })
+        .eq('user_id', userId)
+        .eq('task_id', task.id);
+
+      if (error) {
+        console.error('Error updating task progress:', error);
+        // Rollback on error
+        updateTaskProgress(task.id, { docs_ready: docsReady });
+      }
+    } catch (err) {
+       console.error('Failed to toggle doc:', err);
+       updateTaskProgress(task.id, { docs_ready: docsReady });
+    } finally {
+      setIsUpdating(null);
+    }
   };
 
-  const completedCount = Object.values(checked).filter(Boolean).length;
-  const progress = (completedCount / DOCS.length) * 100;
+  const completedCount = docsReady.length;
+  const totalCount = task.documents.length;
+  const progressPercent = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
 
   return (
     <SafeAreaView className="flex-1 bg-surface">
@@ -36,7 +89,7 @@ export default function DocumentsScreen() {
         <View className="w-8" />
       </View>
 
-      <ScrollView className="flex-1 px-6 pt-10 pb-32 max-w-2xl mx-auto w-full" showsVerticalScrollIndicator={false}>
+      <ScrollView className="flex-1 px-6 pt-10 pb-32 w-full" showsVerticalScrollIndicator={false}>
         <View className="mb-10">
           <Text className="font-headline italic text-4xl text-primary mb-3">Required Papers</Text>
           <Text className="font-body text-base text-on-surface-variant leading-relaxed mb-6">
@@ -47,25 +100,32 @@ export default function DocumentsScreen() {
             className="w-full h-1.5 bg-surface-container-low rounded-full overflow-hidden border"
             style={{ borderColor: 'rgba(232,232,232,0.3)' }}
           >
-            <View className="h-full bg-primary" style={{ width: `${progress}%` }} />
+            <View className="h-full bg-primary" style={{ width: `${progressPercent}%` }} />
           </View>
           <Text className="mt-3 font-sans text-[10px] tracking-widest text-[#BA7517] uppercase font-bold text-right">
-            {completedCount} of {DOCS.length} Ready
+            {completedCount} of {totalCount} Ready
           </Text>
         </View>
 
         <View className="mb-10">
-          {DOCS.map((doc) => {
-             const isChecked = checked[doc.id];
+          {task.documents.map((doc) => {
+             const isChecked = docsReady.includes(doc.id);
+             const isDocUpdating = isUpdating === doc.id;
+
              return (
                <TouchableOpacity
                  key={doc.id}
-                 onPress={() => toggleCheck(doc.id)}
+                 onPress={() => toggleDoc(doc.id)}
+                 disabled={isUpdating !== null && isUpdating !== doc.id}
                  className="border-b border-outline-variant p-5 flex-row items-center"
                  style={{ backgroundColor: isChecked ? 'rgba(232,241,248,0.3)' : '#ffffff' }}
                >
                  <View className={`w-6 h-6 rounded border items-center justify-center mr-4 ${isChecked ? 'bg-[#0E6655] border-[#0E6655]' : 'border-outline-variant bg-white'}`}>
-                   {isChecked && <Check color="#ffffff" size={14} />}
+                   {isDocUpdating ? (
+                     <ActivityIndicator size="small" color={isChecked ? "#ffffff" : "#1B4F72"} />
+                   ) : (
+                     isChecked && <Check color="#ffffff" size={14} />
+                   )}
                  </View>
                  <View className="flex-1 pr-4">
                    <Text className={`font-body text-[16px] font-bold mb-1 ${isChecked ? 'text-primary line-through opacity-70' : 'text-primary'}`}>{doc.name}</Text>
